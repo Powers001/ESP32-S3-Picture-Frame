@@ -44,6 +44,9 @@ This project transforms an ESP32-S3 into a sophisticated digital photo frame wit
 | **SD Card** | MicroSD card (8GB+ recommended, FAT32) | Any retailer |
 | **Power Supply** | 5V 2A USB power adapter | Any retailer |
 
+<img width="300px" src="./Images/ST7796_rear.jpeg" alt="3.5 Inch Rear" />
+<img width="300px" src="./Images/frame_rear.jpeg" alt="SD Reader & ESP32" />
+
 ### Why These Components?
 
 - **ESP32-S3 N16R8**: The 8MB PSRAM is essential for buffering images and creating smooth transitions
