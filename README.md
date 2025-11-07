@@ -4,6 +4,8 @@ A feature-rich digital photo frame built with ESP32-S3, featuring smooth transit
 
 ![ESP32 Photo Frame](https://img.shields.io/badge/ESP32-S3-blue) ![TFT Display](https://img.shields.io/badge/Display-ST7796-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
+<img width="800px" src="./Images/IMG_0040.jpeg" alt="image_name png" />
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -26,7 +28,8 @@ This project transforms an ESP32-S3 into a sophisticated digital photo frame wit
 ### What Makes This Special?
 
 - **Professional startup screen** with system diagnostics
-- **Four smooth transition effects**: Fade, Wipe Down, Pixelate, and None
+- **Sprite buffering** for smooth image rendering from memory
+- **Smooth transition effects
 - **Full web interface** for managing images without removing the SD card
 - **OTA updates** - update firmware wirelessly
 - **PSRAM optimization** for smooth performance with large images
