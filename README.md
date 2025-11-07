@@ -280,10 +280,17 @@ The TFT_eSPI library requires configuration for your specific display. You must 
 #define TFT_CS   5
 #define TFT_DC   4
 #define TFT_RST  6
+#define TFT_BL   7  
+#define TFT_BACKLIGHT_ON HIGH // Level to turn ON back-light (HIGH or LOW)
 
 // Enable SPI frequency
 #define SPI_FREQUENCY  40000000
 #define SPI_READ_FREQUENCY  20000000
+
+// The ESP32 has 2 free SPI ports i.e. VSPI and HSPI, the VSPI is the default.
+// If the VSPI port is in use and pins are not accessible (e.g. TTGO T-Beam)
+// then uncomment the following line:
+#define USE_FSPI_PORT // or USE_HSPI_PORT  //(Important!!!)
 ```
 
 ## 🖼️ Image Preparation
