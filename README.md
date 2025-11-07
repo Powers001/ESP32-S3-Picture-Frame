@@ -111,7 +111,7 @@ ESP32-S3 N16R8
 
 ### Important Notes
 
-- All connections are 3.3V - **never use 5V** on ESP32-S3 pins
+- All connections are 3.3V
 - Ensure your SD card module is labeled as **3.3V compatible**
 - Use short wires (< 10cm) for SPI connections to avoid signal issues
 - The backlight pin (GPIO 7) uses PWM for brightness control
@@ -134,7 +134,9 @@ Four professional transition effects cycle automatically through each image:
 - **Dynamic memory management** - Sprite buffer automatically allocated at startup
 - **Graceful degradation** - Falls back to direct rendering if sprite creation fails
 
-### 2. Professional Startup Screen
+### 2. Professional Startup Screen:
+
+<img width="800px" src="./Images/IMG_0037.jpeg" alt="Start-up Screen" />
 
 Displays comprehensive system diagnostics for 10 seconds on boot:
 
