@@ -374,6 +374,8 @@ done
 
 ### Web Interface Screenshots
 
+<img width="600px" src="./Images/web_interface.png" alt="Web Interface" />
+
 The interface features a dark theme optimized for viewing in various lighting conditions.
 
 ## 🔄 OTA Firmware Updates
