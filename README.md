@@ -29,7 +29,6 @@ This project transforms an ESP32-S3 into a sophisticated digital photo frame wit
 
 - **Professional startup screen** with system diagnostics
 - **Sprite buffering** for smooth image rendering from memory
-- **Smooth transition effects
 - **Full web interface** for managing images without removing the SD card
 - **OTA updates** - update firmware wirelessly
 - **PSRAM optimization** for smooth performance with large images
