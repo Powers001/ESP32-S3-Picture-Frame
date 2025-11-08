@@ -1,11 +1,11 @@
 /*
-  ESP32-S3 Photo Frame with Web Interface - Production Ready
+  ESP32-S3 Photo Frame with Web Interface V10 - Production Ready (Optimized)
   
   Features:
   - Professional startup screen with WiFi status
   - Auto-hotspot mode when WiFi fails (SSID: PhotoFrame-XXXX)
   - Dynamic image indexing (unlimited images)
-  - Configurable display sequence (A-Z, Z-A, Random, etc.)
+  - Configurable display sequence (A-Z, Z-A, Random-no-repeat, etc.)
   - WiFi network scanner and configuration
   - Web interface for image upload/delete/backlight control
   - Instant transitions (no flicker)
@@ -28,6 +28,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <vector>
+#include <algorithm>
 #include <esp_wifi.h>
 
 // ===== CONFIGURATION =====
@@ -77,8 +78,15 @@ uint16_t imageHeight = 0;
 //====================================================================================
 //   Display Sequence Functions
 //====================================================================================
+void shuffleFileNames() {
+  for (int i = fileNames.size() - 1; i > 0; i--) {
+    int j = random(0, i + 1);
+    std::swap(fileNames[i], fileNames[j]);
+  }
+}
+
 void applyDisplaySequence() {
-  if (fileNames.size() == 0) return;
+  if (fileNames.empty()) return;
   
   switch(displaySequence) {
     case 0: // A-Z
@@ -87,28 +95,23 @@ void applyDisplaySequence() {
       break;
       
     case 1: // Z-A
-      std::sort(fileNames.begin(), fileNames.end());
-      std::reverse(fileNames.begin(), fileNames.end());
+      std::sort(fileNames.begin(), fileNames.end(), std::greater<String>());
       Serial.println("Applied sequence: Z-A");
       break;
       
     case 2: // Random
-      for (int i = fileNames.size() - 1; i > 0; i--) {
-        int j = random(0, i + 1);
-        String temp = fileNames[i];
-        fileNames[i] = fileNames[j];
-        fileNames[j] = temp;
-      }
-      Serial.println("Applied sequence: Random");
+      shuffleFileNames();
+      Serial.println("Applied sequence: Random (shuffled)");
       break;
       
     case 3: // Oldest First
-    case 4: // Newest First
       std::sort(fileNames.begin(), fileNames.end());
-      if (displaySequence == 4) {
-        std::reverse(fileNames.begin(), fileNames.end());
-      }
-      Serial.println(displaySequence == 3 ? "Applied sequence: Oldest First" : "Applied sequence: Newest First");
+      Serial.println("Applied sequence: Oldest First");
+      break;
+      
+    case 4: // Newest First
+      std::sort(fileNames.begin(), fileNames.end(), std::greater<String>());
+      Serial.println("Applied sequence: Newest First");
       break;
   }
   
@@ -152,10 +155,9 @@ void drawStartupScreen(int images, uint64_t used, uint64_t total) {
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("* Images found: " + String(images), 30, y, 2);
   y += 20;
-  float usedGB = (float)used / 1024.0 / 1024.0 / 1024.0;
-  float totalGB = (float)total / 1024.0 / 1024.0 / 1024.0;
-  String usage = String(usedGB, 2) + " GB / " + String(totalGB, 2) + " GB";
-  tft.drawString("* Usage: " + usage, 30, y, 2);
+  float usedGB = (float)used / (1024.0 * 1024.0 * 1024.0);
+  float totalGB = (float)total / (1024.0 * 1024.0 * 1024.0);
+  tft.drawString("* Usage: " + String(usedGB, 2) + " GB / " + String(totalGB, 2) + " GB", 30, y, 2);
   y += 30;
   
   // WiFi section
@@ -168,7 +170,7 @@ void drawStartupScreen(int images, uint64_t used, uint64_t total) {
   tft.drawString("Status: Connecting...", 30, y, 2);
 }
 
-void updateWiFiStatus(bool connected, String ip, bool hotspot = false) {
+void updateWiFiStatus(bool connected, const String& ip, bool hotspot = false) {
   int leftY = 60 + 30 + 25 + 20 + 20 + 30 + 25 + 20 + 20;
   
   // Clear status line
@@ -267,7 +269,7 @@ bool decodeJpegToBuffer(const char *filename) {
       imageBuffer = nullptr;
     }
     
-    uint32_t bufferSize = newWidth * newHeight;
+    uint32_t bufferSize = (uint32_t)newWidth * newHeight;
     imageBuffer = (uint16_t*)ps_malloc(bufferSize * sizeof(uint16_t));
     
     if (imageBuffer == nullptr) {
@@ -288,27 +290,23 @@ bool decodeJpegToBuffer(const char *filename) {
     uint16_t mcu_w = JpegDec.MCUWidth;
     uint16_t mcu_h = JpegDec.MCUHeight;
     
-    uint16_t win_w = mcu_w;
-    uint16_t win_h = mcu_h;
-    
-    if ((JpegDec.MCUx + 1) * mcu_w > imageWidth) {
-      win_w = imageWidth - JpegDec.MCUx * mcu_w;
-    }
-    if ((JpegDec.MCUy + 1) * mcu_h > imageHeight) {
-      win_h = imageHeight - JpegDec.MCUy * mcu_h;
-    }
+    uint16_t win_w = (JpegDec.MCUx + 1) * mcu_w > imageWidth ? 
+                     imageWidth - JpegDec.MCUx * mcu_w : mcu_w;
+    uint16_t win_h = (JpegDec.MCUy + 1) * mcu_h > imageHeight ? 
+                     imageHeight - JpegDec.MCUy * mcu_h : mcu_h;
 
     // Copy to buffer with color correction
+    uint32_t baseIdx = (uint32_t)JpegDec.MCUy * mcu_h * imageWidth + JpegDec.MCUx * mcu_w;
+    
     for (uint16_t y = 0; y < win_h; y++) {
+      uint32_t rowIdx = baseIdx + y * imageWidth;
       for (uint16_t x = 0; x < win_w; x++) {
         uint16_t pixel = pImg[y * mcu_w + x];
 #if SWAP_COLOR_BYTES
         pixel = swapBytes(pixel);
 #endif
-        uint32_t targetX = JpegDec.MCUx * mcu_w + x;
-        uint32_t targetY = JpegDec.MCUy * mcu_h + y;
-        if (targetX < imageWidth && targetY < imageHeight) {
-          imageBuffer[targetY * imageWidth + targetX] = pixel;
+        if (rowIdx + x < (uint32_t)imageWidth * imageHeight) {
+          imageBuffer[rowIdx + x] = pixel;
         }
       }
     }
@@ -372,10 +370,9 @@ bool scanForImages() {
       
       name.toUpperCase();
       if (name.endsWith(".JPG") || name.endsWith(".JPEG")) {
-        String fullPath = "/" + String(file.name());
-        fileNames.push_back(fullPath);
-        Serial.printf("  [%d] %s (%d bytes)\n", fileNames.size(), 
-                     fullPath.c_str(), file.size());
+        fileNames.push_back("/" + String(file.name()));
+        Serial.printf("  [%d] /%s (%d bytes)\n", fileNames.size(), 
+                     file.name(), file.size());
       }
     }
     file = root.openNextFile();
@@ -386,19 +383,18 @@ bool scanForImages() {
   
   applyDisplaySequence();
   
-  return (fileNames.size() > 0);
+  return !fileNames.empty();
 }
 
 //====================================================================================
 //   WiFi Hotspot Mode
 //====================================================================================
 void startHotspot() {
-  // Generate unique SSID using MAC address
   uint8_t mac[6];
   WiFi.macAddress(mac);
   
   char macStr[5];
-  sprintf(macStr, "%02X%02X", mac[4], mac[5]);
+  snprintf(macStr, sizeof(macStr), "%02X%02X", mac[4], mac[5]);
   hotspotSSID = "PhotoFrame-" + String(macStr);
   
   Serial.println("\n╔═══════════════════════════════════════╗");
@@ -408,17 +404,13 @@ void startHotspot() {
   Serial.println("Password: admin");
   Serial.println("IP: 192.168.4.1");
   
-  // Stop any existing WiFi
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   delay(100);
   
-  // Start AP mode
   WiFi.mode(WIFI_AP);
   delay(100);
   
-  // Configure AP with explicit settings
-  // Parameters: SSID, password, channel, hidden (0=visible), max_connections
   bool apStarted = WiFi.softAP(hotspotSSID.c_str(), "admin", 1, 0, 4);
   
   if (apStarted) {
@@ -428,7 +420,6 @@ void startHotspot() {
     Serial.println("✗ Hotspot failed to start!");
   }
   
-  // Configure IP address
   IPAddress local_IP(192, 168, 4, 1);
   IPAddress gateway(192, 168, 4, 1);
   IPAddress subnet(255, 255, 255, 0);
@@ -499,7 +490,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     .success { background: #2a5a2a; }
     .error { background: #5a2a2a; }
     .info { background: #2a4a5a; }
-    .warning { background: #5a4a2a; }
     .form-group { margin: 15px 0; }
     .form-group label { display: block; margin-bottom: 5px; color: #aaa; }
     .network-item { padding: 8px; margin: 5px 0; background: #3a3a3a; 
@@ -576,7 +566,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         <select id="sequenceSelect" onchange="setSequence()">
           <option value="0">A-Z (Alphabetical)</option>
           <option value="1">Z-A (Reverse Alphabetical)</option>
-          <option value="2">Random Shuffle</option>
+          <option value="2">Random Shuffle (No Repeats)</option>
           <option value="3">Oldest First</option>
           <option value="4">Newest First</option>
         </select>
@@ -599,7 +589,6 @@ const char index_html[] PROGMEM = R"rawliteral(
   <script>
     let selectedSSID = '';
     
-    // Load current settings
     fetch('/backlight').then(r => r.json()).then(data => {
       const percent = Math.round((data.level / 255) * 100);
       document.getElementById('backlightSlider').value = percent;
@@ -666,12 +655,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           if (data.networks && data.networks.length > 0) {
             let html = '<div style="max-height: 300px; overflow-y: auto;">';
             data.networks.forEach(net => {
-              let signalBars = '';
-              if (net.rssi > -50) signalBars = '[####]';
-              else if (net.rssi > -60) signalBars = '[### ]';
-              else if (net.rssi > -70) signalBars = '[##  ]';
-              else signalBars = '[#   ]';
-              
+              let signalBars = net.rssi > -50 ? '[####]' : net.rssi > -60 ? '[### ]' : net.rssi > -70 ? '[##  ]' : '[#   ]';
               const lockIcon = net.encryption ? '[LOCK]' : '[OPEN]';
               html += `<div class="network-item" onclick="selectNetwork('${net.ssid}')">
                 <span>${lockIcon} ${net.ssid}</span>
@@ -734,9 +718,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           if (data.success) {
             status.innerHTML = '<div class="status success">' + data.message + 
               '<br>Device will restart in 3 seconds...</div>';
-            setTimeout(() => {
-              location.reload();
-            }, 3000);
+            setTimeout(() => location.reload(), 3000);
           } else {
             status.innerHTML = '<div class="status error">' + data.message + '</div>';
           }
@@ -760,7 +742,7 @@ const char index_html[] PROGMEM = R"rawliteral(
           return;
         }
         
-        data.files.forEach((file, index) => {
+        data.files.forEach(file => {
           const li = document.createElement('li');
           li.className = 'file-item';
           li.innerHTML = `
@@ -780,10 +762,7 @@ const char index_html[] PROGMEM = R"rawliteral(
     function toggleSelectAll() {
       const selectAllCheckbox = document.getElementById('selectAllCheckbox');
       const fileCheckboxes = document.querySelectorAll('.file-checkbox');
-      
-      fileCheckboxes.forEach(checkbox => {
-        checkbox.checked = selectAllCheckbox.checked;
-      });
+      fileCheckboxes.forEach(checkbox => checkbox.checked = selectAllCheckbox.checked);
     }
     
     function deleteFile(filename) {
@@ -794,9 +773,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             alert(data.message);
             refreshList();
           })
-          .catch(e => {
-            alert('Error deleting file: ' + e.message);
-          });
+          .catch(e => alert('Error deleting file: ' + e.message));
       }
     }
 
@@ -818,9 +795,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             alert(data.message);
             refreshList();
           })
-          .catch(e => {
-            alert('Error deleting files: ' + e.message);
-          });
+          .catch(e => alert('Error deleting files: ' + e.message));
       }
     }
     
@@ -843,7 +818,6 @@ const char index_html[] PROGMEM = R"rawliteral(
       for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
         
-        // Validate file size (max 10MB)
         if (file.size > 10 * 1024 * 1024) {
           status.innerHTML = `<div class="status error">${file.name} is too large (max 10MB)</div>`;
           progressBarContainer.style.display = 'none';
@@ -889,102 +863,115 @@ const char index_html[] PROGMEM = R"rawliteral(
 //   Web Server Setup
 //====================================================================================
 void setupWebServer() {
-  // Main page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send_P(200, "text/html", index_html);
   });
   
-  // Get settings
   server.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{\"sequence\":" + String(displaySequence) + 
-                  ",\"ssid\":\"" + (WiFi.status() == WL_CONNECTED ? wifi_ssid : "") + "\"}";
+    StaticJsonDocument<128> doc;
+    doc["sequence"] = displaySequence;
+    doc["ssid"] = (WiFi.status() == WL_CONNECTED ? wifi_ssid : "");
+    
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
   
-  // Set display sequence
   server.on("/sequence/set", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("value")) {
-      int seq = request->getParam("value")->value().toInt();
-      
-      if (seq >= 0 && seq <= 4) {
-        displaySequence = seq;
-        
-        preferences.begin("photoframe", false);
-        preferences.putUChar("sequence", displaySequence);
-        preferences.end();
-        
-        applyDisplaySequence();
-        
-        const char* seqNames[] = {"A-Z", "Z-A", "Random", "Oldest First", "Newest First"};
-        String json = "{\"success\":true,\"message\":\"Sequence set to " + 
-                      String(seqNames[seq]) + "\"}";
-        request->send(200, "application/json", json);
-        Serial.printf("✓ Display sequence changed to: %s\n", seqNames[seq]);
-      } else {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid sequence\"}");
-      }
-    } else {
+    if (!request->hasParam("value")) {
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing value parameter\"}");
+      return;
     }
+    
+    int seq = request->getParam("value")->value().toInt();
+    
+    if (seq < 0 || seq > 4) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid sequence\"}");
+      return;
+    }
+    
+    displaySequence = seq;
+    
+    preferences.begin("photoframe", false);
+    preferences.putUChar("sequence", displaySequence);
+    preferences.end();
+    
+    applyDisplaySequence();
+    
+    const char* seqNames[] = {"A-Z", "Z-A", "Random", "Oldest First", "Newest First"};
+    
+    StaticJsonDocument<128> doc;
+    doc["success"] = true;
+    doc["message"] = String("Sequence set to ") + seqNames[seq];
+    
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+    Serial.printf("✓ Display sequence changed to: %s\n", seqNames[seq]);
   });
   
-  // Set backlight level
   server.on("/backlight/set", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("level")) {
-      int level = request->getParam("level")->value().toInt();
-      
-      if (level >= 0 && level <= 255) {
-        currentBacklight = level;
-        analogWrite(TFT_BACKLIGHT, currentBacklight);
-        
-        preferences.begin("photoframe", false);
-        preferences.putUChar("backlight", currentBacklight);
-        preferences.end();
-        
-        int percent = (currentBacklight * 100) / 255;
-        String json = "{\"success\":true,\"message\":\"Backlight set to " + String(percent) + "%\"}";
-        request->send(200, "application/json", json);
-        Serial.printf("✓ Backlight changed to %d/255 (%d%%)\n", currentBacklight, percent);
-      } else {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid level\"}");
-      }
-    } else {
+    if (!request->hasParam("level")) {
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Missing level parameter\"}");
+      return;
     }
+    
+    int level = request->getParam("level")->value().toInt();
+    
+    if (level < 0 || level > 255) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid level\"}");
+      return;
+    }
+    
+    currentBacklight = level;
+    analogWrite(TFT_BACKLIGHT, currentBacklight);
+    
+    preferences.begin("photoframe", false);
+    preferences.putUChar("backlight", currentBacklight);
+    preferences.end();
+    
+    int percent = (currentBacklight * 100) / 255;
+    
+    StaticJsonDocument<128> doc;
+    doc["success"] = true;
+    doc["message"] = String("Backlight set to ") + String(percent) + "%";
+    
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+    Serial.printf("✓ Backlight changed to %d/255 (%d%%)\n", currentBacklight, percent);
   });
   
-  // Get current backlight level
   server.on("/backlight", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{\"level\":" + String(currentBacklight) + "}";
+    StaticJsonDocument<64> doc;
+    doc["level"] = currentBacklight;
+    
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
   
-  // Scan WiFi networks
   server.on("/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
     int n = WiFi.scanNetworks();
-    String json = "{\"networks\":[";
+    DynamicJsonDocument doc(2048);
+    JsonArray networks = doc.createNestedArray("networks");
     
     for (int i = 0; i < n; i++) {
-      if (i > 0) json += ",";
-      json += "{\"ssid\":\"" + WiFi.SSID(i) + "\",";
-      json += "\"rssi\":" + String(WiFi.RSSI(i)) + ",";
-      json += "\"encryption\":" + String(WiFi.encryptionType(i) != WIFI_AUTH_OPEN) + "}";
+      JsonObject net = networks.createNestedObject();
+      net["ssid"] = WiFi.SSID(i);
+      net["rssi"] = WiFi.RSSI(i);
+      net["encryption"] = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
     }
-    json += "]}";
     
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
   
-  // Connect to WiFi
   server.on("/wifi/connect", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-      String body = "";
-      for(size_t i=0; i<len; i++){
-        body += (char)data[i];
-      }
-      
       DynamicJsonDocument doc(512);
-      DeserializationError error = deserializeJson(doc, body);
+      DeserializationError error = deserializeJson(doc, data, len);
       
       if (error) {
         request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid JSON\"}");
@@ -994,68 +981,63 @@ void setupWebServer() {
       String ssid = doc["ssid"].as<String>();
       String password = doc["password"].as<String>();
       
-      if (ssid.length() > 0) {
-        // Save credentials (password stored as-is in encrypted preferences namespace)
-        preferences.begin("photoframe", false);
-        preferences.putString("wifi_ssid", ssid);
-        preferences.putString("wifi_pass", password);
-        preferences.end();
-        
-        wifi_ssid = ssid;
-        wifi_password = password;
-        
-        request->send(200, "application/json", 
-          "{\"success\":true,\"message\":\"Credentials saved. Restarting...\"}");
-        
-        Serial.println("✓ New WiFi credentials saved");
-        Serial.println("  SSID: " + ssid);
-        delay(1000);
-        ESP.restart();
-      } else {
-        request->send(400, "application/json", 
-          "{\"success\":false,\"message\":\"Invalid SSID\"}");
+      if (ssid.length() == 0) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Invalid SSID\"}");
+        return;
       }
+      
+      preferences.begin("photoframe", false);
+      preferences.putString("wifi_ssid", ssid);
+      preferences.putString("wifi_pass", password);
+      preferences.end();
+      
+      wifi_ssid = ssid;
+      wifi_password = password;
+      
+      request->send(200, "application/json", 
+        "{\"success\":true,\"message\":\"Credentials saved. Restarting...\"}");
+      
+      Serial.println("✓ New WiFi credentials saved");
+      Serial.println("  SSID: " + ssid);
+      delay(1000);
+      ESP.restart();
     }
   );
   
-  // List files
   server.on("/list", HTTP_GET, [](AsyncWebServerRequest *request) {
-    String json = "{\"files\":[";
-    for (size_t i = 0; i < fileNames.size(); i++) {
-      if (i > 0) json += ",";
-      json += "\"" + fileNames[i] + "\"";
+    DynamicJsonDocument doc(2048);
+    JsonArray files = doc.createNestedArray("files");
+    
+    for (const auto& filename : fileNames) {
+      files.add(filename);
     }
-    json += "]}";
+    
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
   
-  // Delete file
   server.on("/delete", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("file")) {
-      String filename = request->getParam("file")->value();
-      if (SD.remove(filename)) {
-        Serial.println("✓ Deleted: " + filename);
-        scanForImages();
-        request->send(200, "application/json", "{\"message\":\"File deleted\"}");
-      } else {
-        Serial.println("✗ Failed to delete: " + filename);
-        request->send(500, "application/json", "{\"message\":\"Delete failed\"}");
-      }
-    } else {
+    if (!request->hasParam("file")) {
       request->send(400, "application/json", "{\"message\":\"Missing file parameter\"}");
+      return;
+    }
+    
+    String filename = request->getParam("file")->value();
+    if (SD.remove(filename)) {
+      Serial.println("✓ Deleted: " + filename);
+      scanForImages();
+      request->send(200, "application/json", "{\"message\":\"File deleted\"}");
+    } else {
+      Serial.println("✗ Failed to delete: " + filename);
+      request->send(500, "application/json", "{\"message\":\"Delete failed\"}");
     }
   });
 
-  // Delete selected files
   server.on("/delete-selected", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, 
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-      String body = "";
-      for(size_t i=0; i<len; i++){
-        body += (char)data[i];
-      }
-      
       DynamicJsonDocument doc(2048);
-      DeserializationError error = deserializeJson(doc, body);
+      DeserializationError error = deserializeJson(doc, data, len);
       
       if (error) {
         request->send(400, "application/json", "{\"message\":\"Invalid JSON\"}");
@@ -1065,7 +1047,7 @@ void setupWebServer() {
       JsonArray files = doc["files"];
       int deleted = 0;
       
-      for(JsonVariant v : files) {
+      for (JsonVariant v : files) {
         String filename = v.as<String>();
         if (SD.remove(filename)) {
           deleted++;
@@ -1074,11 +1056,15 @@ void setupWebServer() {
       }
       
       scanForImages();
-      String msg = "{\"message\":\"Deleted " + String(deleted) + " file(s)\"}";
-      request->send(200, "application/json", msg);
+      
+      StaticJsonDocument<128> responseDoc;
+      responseDoc["message"] = String("Deleted ") + String(deleted) + " file(s)";
+      
+      String json;
+      serializeJson(responseDoc, json);
+      request->send(200, "application/json", json);
   });
 
-  // Upload file
   server.on("/upload", HTTP_POST, 
     [](AsyncWebServerRequest *request) {
       request->send(200, "application/json", "{\"message\":\"Upload complete\"}");
@@ -1087,7 +1073,6 @@ void setupWebServer() {
       static File uploadFile;
       
       if (index == 0) {
-        // Sanitize filename
         filename.replace("/", "_");
         filename.replace("\\", "_");
         
@@ -1114,7 +1099,6 @@ void setupWebServer() {
     }
   );
 
-  // Serve images from SD card
   server.onNotFound([](AsyncWebServerRequest *request){
     String path = request->url();
     if (SD.exists(path)) {
@@ -1138,7 +1122,6 @@ void setup() {
   Serial.println("║  ESP32-S3 Photo Frame - Production   ║");
   Serial.println("╚═══════════════════════════════════════╝\n");
 
-  // Load saved settings
   preferences.begin("photoframe", true);
   currentBacklight = preferences.getUChar("backlight", BACKLIGHT_LEVEL);
   displaySequence = preferences.getUChar("sequence", 0);
@@ -1154,20 +1137,16 @@ void setup() {
     Serial.println("No WiFi credentials stored");
   }
 
-  // Configure backlight
   pinMode(TFT_BACKLIGHT, OUTPUT);
   analogWrite(TFT_BACKLIGHT, currentBacklight);
 
-  // Initialize display
   tft.begin();
   tft.setRotation(1);
   tft.fillScreen(TFT_BLACK);
   Serial.printf("✓ TFT initialized (%dx%d)\n", tft.width(), tft.height());
   
-  // Re-apply backlight
   analogWrite(TFT_BACKLIGHT, currentBacklight);
 
-  // Initialize SD card
   Serial.println("\nInitializing SD card...");
   sd_spi.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   
@@ -1180,17 +1159,14 @@ void setup() {
     while (1) delay(1000);
   }
   
-  Serial.printf("✓ SD card mounted\n");
+  Serial.println("✓ SD card mounted");
 
-  // Scan for images
   scanForImages();
   uint64_t usedBytes = SD.usedBytes();
   uint64_t totalBytes = SD.totalBytes();
 
-  // Draw startup screen
   drawStartupScreen(fileNames.size(), usedBytes, totalBytes);
 
-  // Try to connect to WiFi
   bool wifiConnected = false;
   
   if (wifi_ssid.length() > 0) {
@@ -1205,7 +1181,6 @@ void setup() {
     Serial.println("✓ WiFi Connected!");
     Serial.println("  IP: " + ipAddress);
   } else {
-    // Start hotspot mode
     startHotspot();
     ipAddress = WiFi.softAPIP().toString();
     updateWiFiStatus(true, ipAddress, true);
@@ -1214,14 +1189,13 @@ void setup() {
   setupWebServer();
   Serial.println("✓ Web server started");
   
-  delay(10000);  // Display startup screen for 10 seconds
+  delay(10000);
 
-  if (fileNames.size() == 0) {
+  if (fileNames.empty()) {
     tft.fillScreen(TFT_BLACK);
     tft.setTextDatum(MC_DATUM);
     
     if (isHotspotMode) {
-      // Show hotspot connection info when no images
       int centerX = tft.width() / 2;
       int y = 60;
       
@@ -1251,7 +1225,6 @@ void setup() {
       tft.setTextColor(TFT_YELLOW);
       tft.drawString("Configure WiFi & Upload Images", centerX, y, 2);
     } else {
-      // Regular no images message
       int y = tft.height() / 2 - 20;
       tft.setTextColor(TFT_ORANGE);
       tft.drawString("No images found", tft.width()/2, y, 4);
@@ -1260,23 +1233,20 @@ void setup() {
       tft.drawString("Upload images via web interface", tft.width()/2, y, 2);
     }
     
-    // Keep web server running
     while (1) {
       delay(1000);
       
-      // Check if we should retry WiFi connection
       if (isHotspotMode && (millis() - hotspotStartTime > HOTSPOT_TIMEOUT)) {
         Serial.println("\nRetrying WiFi connection...");
         if (wifi_ssid.length() > 0 && connectToWiFi()) {
           Serial.println("✓ WiFi reconnected!");
           ESP.restart();
         }
-        hotspotStartTime = millis(); // Reset timer
+        hotspotStartTime = millis();
       }
     }
   }
 
-  // Clear screen and load first image
   tft.fillScreen(TFT_BLACK);
   Serial.println("Loading first image...\n");
   
@@ -1292,7 +1262,6 @@ void setup() {
 //   Loop
 //====================================================================================
 void loop() {
-  // Check for WiFi reconnection in hotspot mode
   if (isHotspotMode && (millis() - hotspotStartTime > HOTSPOT_TIMEOUT)) {
     Serial.println("\nRetrying WiFi connection...");
     if (wifi_ssid.length() > 0 && connectToWiFi()) {
@@ -1302,15 +1271,19 @@ void loop() {
     hotspotStartTime = millis();
   }
   
-  // Handle single image case
   if (fileNames.size() <= 1) {
     delay(1000);
     return;
   }
 
-  // Slideshow timing
   if (millis() - lastImageTime >= SLIDESHOW_DELAY) {
     currentIndex = (currentIndex + 1) % fileNames.size();
+    
+    // Reshuffle when random mode completes a full cycle
+    if (displaySequence == 2 && currentIndex == 0 && fileNames.size() > 1) {
+      Serial.println("Random cycle complete - reshuffling...");
+      shuffleFileNames();
+    }
     
     Serial.printf("Image %d/%d: %s\n", currentIndex + 1, fileNames.size(), 
                   fileNames[currentIndex].c_str());
