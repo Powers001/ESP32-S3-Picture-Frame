@@ -33,6 +33,7 @@ This project transforms an ESP32-S3 into a sophisticated digital photo frame wit
 - **OTA updates** - update firmware wirelessly
 - **PSRAM optimization** for smooth performance with large images
 - **Automatic image centering** for different aspect ratios
+- Auto-Hotspot Broadcast when unble to connect to Wifi
 
 ## 🔧 Hardware Requirements
 
@@ -444,12 +445,12 @@ ElegantOTA provides a professional web interface for wireless firmware updates.
 
 ### WiFi Settings
 
-Edit these lines in the sketch:
+⚙️ How It Works in Practice:
+ - Normal Case: ESP32 connects to your router → you access it via your LAN.
+ - Unable to connect to WiFi: Router is down or credentials are wrong → ESP32 starts its own hotspot → you connect directly to it with the password "admin"
+ - Unable to connect to WiFi & known WiFi network becomes avaialbe again, device scanns every 5 minutes & retries your saved WiFi. If successful, it drops hotspot mode and rejoins your LAN.
 
-```cpp
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-```
+✅ In short: The hotspot config is a self-healing fallback system. It ensures you never lose access to the ESP32’s web interface, whether your router is up or not.
 
 ### Slideshow Timing
 
